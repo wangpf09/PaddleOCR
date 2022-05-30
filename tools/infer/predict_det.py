@@ -260,7 +260,7 @@ if __name__ == "__main__":
     text_detector = TextDetector(args)
     count = 0
     total_time = 0
-    draw_img_save = "./inference_results"
+    draw_img_save = args.draw_img_save_dir
 
     if args.warmup:
         img = np.random.uniform(0, 255, [640, 640, 3]).astype(np.uint8)

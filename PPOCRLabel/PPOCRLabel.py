@@ -463,7 +463,7 @@ class MainWindow(QMainWindow):
 
         createpoly = action(getStr('creatPolygon'), self.createPolygon,
                             'q', 'new', getStr('creatPolygon'), enabled=False)
-        
+
         tableRec = action(getStr('TableRecognition'), self.TableRecognition,
                         '', 'Auto', getStr('TableRecognition'), enabled=False)
 
@@ -475,7 +475,7 @@ class MainWindow(QMainWindow):
 
         saveLabel = action(getStr('saveLabel'), self.saveLabelFile,  #
                            'Ctrl+S', 'save', getStr('saveLabel'), enabled=False)
-        
+
         exportJSON = action(getStr('exportJSON'), self.exportJSON,
                             '', 'save', getStr('exportJSON'), enabled=False)
 
@@ -1657,6 +1657,10 @@ class MainWindow(QMainWindow):
         if self.defaultSaveDir and self.defaultSaveDir != dirpath:
             self.saveLabelFile()
 
+        self.fileListWidget.clear()
+        self.mImgList = self.scanAllImages(dirpath)
+        self.mImgList5 = self.mImgList[:5]
+
         if not isDelete:
             self.loadFilestate(dirpath)
             self.PPlabelpath = dirpath + '/Label.txt'
@@ -1667,6 +1671,10 @@ class MainWindow(QMainWindow):
                 self.PPlabel = dict(self.Cachelabel, **self.PPlabel)
 
             self.init_key_list(self.PPlabel)
+            self.filePath = None
+            self.openNextImg()
+            # set list index to first
+            self.fileListWidget.setCurrentRow(0)
 
         self.lastOpenDir = dirpath
         self.dirname = dirpath
@@ -1676,11 +1684,6 @@ class MainWindow(QMainWindow):
                                      (__appname__, self.defaultSaveDir))
         self.statusBar().show()
 
-        self.filePath = None
-        self.fileListWidget.clear()
-        self.mImgList = self.scanAllImages(dirpath)
-        self.mImgList5 = self.mImgList[:5]
-        self.openNextImg()
         doneicon = newIcon('done')
         closeicon = newIcon('close')
         for imgPath in self.mImgList:
@@ -1705,9 +1708,11 @@ class MainWindow(QMainWindow):
         self.actions.open_dataset_dir.setEnabled(True)
         self.actions.rotateLeft.setEnabled(True)
         self.actions.rotateRight.setEnabled(True)
-
-        self.fileListWidget.setCurrentRow(0)  # set list index to first
-        self.fileDock.setWindowTitle(self.fileListName + f" (1/{self.fileListWidget.count()})")  # show image count
+        # set list index to current
+        self.fileListWidget.setCurrentRow(self.currIndex)
+        self.fileDock.setWindowTitle(
+            self.fileListName + f" ({self.currIndex + 1}/{self.fileListWidget.count()})"
+        )  # show image count
 
     def openPrevImg(self, _value=False):
         if len(self.mImgList) <= 0:
@@ -1736,12 +1741,12 @@ class MainWindow(QMainWindow):
             filename = self.mImgList[0]
             self.mImgList5 = self.mImgList[:5]
         else:
-            currIndex = self.mImgList.index(self.filePath)
-            if currIndex + 1 < len(self.mImgList):
-                filename = self.mImgList[currIndex + 1]
-                self.mImgList5 = self.indexTo5Files(currIndex + 1)
+            self.currIndex = self.mImgList.index(self.filePath)
+            if self.currIndex + 1 < len(self.mImgList):
+                filename = self.mImgList[self.currIndex + 1]
+                self.mImgList5 = self.indexTo5Files(self.currIndex + 1)
             else:
-                self.mImgList5 = self.indexTo5Files(currIndex)
+                self.mImgList5 = self.indexTo5Files(self.currIndex)
         if filename:
             print('file name in openNext is ', filename)
             self.loadFile(filename)
@@ -1801,7 +1806,7 @@ class MainWindow(QMainWindow):
                     self.openNextImg()
                 self.actions.saveRec.setEnabled(True)
                 self.actions.saveLabel.setEnabled(True)
-                self.actions.exportJSON.setEnabled(True) 
+                self.actions.exportJSON.setEnabled(True)
 
         elif mode == 'Auto':
             if annotationFilePath and self.saveLabels(annotationFilePath, mode=mode):
@@ -1824,10 +1829,13 @@ class MainWindow(QMainWindow):
             deleteInfo = self.deleteImgDialog()
             if deleteInfo == QMessageBox.Yes:
                 if platform.system() == 'Windows':
-                    from win32com.shell import shell, shellcon
-                    shell.SHFileOperation((0, shellcon.FO_DELETE, deletePath, None,
-                                           shellcon.FOF_SILENT | shellcon.FOF_ALLOWUNDO | shellcon.FOF_NOCONFIRMATION,
-                                           None, None))
+                    try:
+                        from win32com.shell import shell, shellcon
+                        shell.SHFileOperation((0, shellcon.FO_DELETE, deletePath, None,
+                                               shellcon.FOF_SILENT | shellcon.FOF_ALLOWUNDO | shellcon.FOF_NOCONFIRMATION,
+                                               None, None))
+                    except ImportError:
+                        os.remove(deletePath)
                     # linux
                 elif platform.system() == 'Linux':
                     cmd = 'trash ' + deletePath
@@ -2156,13 +2164,13 @@ class MainWindow(QMainWindow):
         filename, _ = os.path.splitext(os.path.basename(self.filePath))
 
         excel_path = TableRec_excel_dir + '{}.xlsx'.format(filename)
-        
+
         if res is None:
             msg = 'Can not recognise the table in ' + self.filePath + '. Please change manually'
             QMessageBox.information(self, "Information", msg)
             to_excel('', excel_path) # create an empty excel
             return
-        
+
         # save res
         # ONLY SUPPORT ONE TABLE in one image
         hasTable = False
@@ -2200,7 +2208,7 @@ class MainWindow(QMainWindow):
                     shape = Shape(label=rec_text, line_color=DEFAULT_LINE_COLOR, key_cls=None)
                     for point in rext_bbox:
                         x, y = point
-                        # Ensure the labels are within the bounds of the image. 
+                        # Ensure the labels are within the bounds of the image.
                         # If not, fix them.
                         x, y, snapped = self.canvas.snapPointToCanvas(x, y)
                         shape.addPoint(QPointF(x, y))
@@ -2211,14 +2219,14 @@ class MainWindow(QMainWindow):
                     shapes.append(shape)
                 self.setDirty()
                 self.canvas.loadShapes(shapes)
-                
+
                 # save HTML result to excel
                 try:
                     to_excel(region['res']['html'], excel_path)
                 except:
                     print('Can not save excel file, maybe Permission denied (.xlsx is being occupied)')
                 break
-        
+
         if not hasTable:
             msg = 'Can not recognise the table in ' + self.filePath + '. Please change manually'
             QMessageBox.information(self, "Information", msg)
@@ -2246,7 +2254,7 @@ class MainWindow(QMainWindow):
                     ".xlsx is not existed")
         else:
             os.system('open ' + os.path.normpath(excel_path))
-                
+
         print('time cost: ', time.time() - start)
 
     def cellreRecognition(self):
@@ -2346,7 +2354,7 @@ class MainWindow(QMainWindow):
         train_split, val_split, test_split = float(train_split) / 100., float(val_split) / 100., float(test_split) / 100.
         train_id = int(len(labeldict) * train_split)
         val_id = int(len(labeldict) * (train_split + val_split))
-        print('Data partition: train:', train_id, 
+        print('Data partition: train:', train_id,
               'validation:',  val_id - train_id,
               'test:', len(labeldict) - val_id)
 
@@ -2378,7 +2386,7 @@ class MainWindow(QMainWindow):
                 obb = anno['points']
                 hbb = OBB2HBB(np.array(obb)).tolist()
                 cells.append({'tokens': tokens, 'bbox': hbb})
-            
+
             # data split
             if imgid < train_id:
                 split = 'train'
@@ -2395,7 +2403,7 @@ class MainWindow(QMainWindow):
         # save json
         with open("{}/annotation.json".format(self.lastOpenDir), "w", encoding='utf-8') as fid:
             fid.write(json.dumps(json_results, ensure_ascii=False))
-        
+
         msg = 'JSON sucessfully saved in {}/annotation.json'.format(self.lastOpenDir)
         QMessageBox.information(self, "Information", msg)
 
@@ -2605,7 +2613,7 @@ class MainWindow(QMainWindow):
     def lockSelectedShape(self):
         """lock the selected shapes.
 
-        Add self.selectedShapes to lock self.canvas.lockedShapes, 
+        Add self.selectedShapes to lock self.canvas.lockedShapes,
         which holds the ratio of the four coordinates of the locked shapes
         to the width and height of the image
         """

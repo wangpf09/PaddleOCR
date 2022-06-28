@@ -1,6 +1,8 @@
-name
-sex
-nation
-birthday
-address
-number
+0 name
+1 sex
+2 nation
+3 birthday
+4 address
+5 number
+6 valid
+7 office

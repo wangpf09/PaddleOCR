@@ -1,0 +1,116 @@
+Global:
+  use_gpu: true
+  epoch_num: 10000
+  log_smooth_window: 20
+  print_batch_step: 10
+  save_model_dir: ../output/bankcard/det_r50_vd_east/
+  save_epoch_step: 50
+  # evaluation is run every 5000 iterations after the 4000th iteration
+  eval_batch_step: [ 0, 1500 ]
+  cal_metric_during_train: False
+  pretrained_model: ../pretrained_model/r50/det_r50_vd_east_v2.0_train/best_accuracy.pdparams
+  checkpoints:
+  save_inference_dir: ../output/bankcard/det_r50_vd_east/inference
+  use_visualdl: true
+  infer_img:
+  save_res_path: ../output/bankcard/det_r50_vd_east/predicts_east.txt
+
+Architecture:
+  model_type: det
+  algorithm: EAST
+  Transform:
+  Backbone:
+    name: ResNet
+    layers: 50
+  Neck:
+    name: EASTFPN
+    model_name: large
+  Head:
+    name: EASTHead
+    model_name: large
+
+Loss:
+  name: EASTLoss
+
+Optimizer:
+  name: Adam
+  beta1: 0.9
+  beta2: 0.999
+  lr:
+    name: Piecewise
+    decay_epochs: [ 4, 10, 16, 20 ]
+    values: [ 0.001, 0.00009, 0.00005, 0.00001 ]
+    warmup_epoch: 1
+  regularizer:
+    name: 'L2'
+    factor: 5.0e-05
+
+PostProcess:
+  name: EASTPostProcess
+  score_thresh: 0.8
+  cover_thresh: 0.1
+  nms_thresh: 0.2
+
+Metric:
+  name: DetMetric
+  main_indicator: hmean
+
+Train:
+  dataset:
+    name: SimpleDataSet
+    data_dir: ../train_data
+    label_file_list:
+      - ../train_data/bank/bank1/real_det_train.txt
+      - ../train_data/bank/bank2/real_det_train.txt
+      - ../train_data/bank/bank3/real_det_train.txt
+      - ../train_data/bank/bank2/real_det_test.txt
+      - ../train_data/bank/bank3/real_det_test.txt
+      - ../train_data/bank-axa/det/train.txt
+    ratio_list: [ 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 ]
+    transforms:
+      - DecodeImage: # load image
+          img_mode: BGR
+          channel_first: False
+      - DetLabelEncode: # Class handling label
+      - EASTProcessTrain:
+          image_shape: [ 512, 512 ]
+          background_ratio: 0.125
+          min_crop_side_ratio: 0.1
+          min_text_size: 10
+      - KeepKeys:
+          keep_keys: [ 'image', 'score_map', 'geo_map', 'training_mask' ] # dataloader will return list in this order
+  loader:
+    shuffle: True
+    drop_last: False
+    batch_size_per_card: 4
+    num_workers: 4
+
+Eval:
+  dataset:
+    name: SimpleDataSet
+    data_dir: ../train_data
+    label_file_list:
+      - ../train_data/bank/bank1/real_det_test.txt
+      - ../train_data/bank-axa/det/test.txt
+    ratio_list: [ 1.0, 1.0 ]
+    transforms:
+      - DecodeImage: # load image
+          img_mode: BGR
+          channel_first: False
+      - DetLabelEncode: # Class handling label
+      - DetResizeForTest:
+          limit_side_len: 2400
+          limit_type: max
+      - NormalizeImage:
+          scale: 1./255.
+          mean: [ 0.485, 0.456, 0.406 ]
+          std: [ 0.229, 0.224, 0.225 ]
+          order: 'hwc'
+      - ToCHWImage:
+      - KeepKeys:
+          keep_keys: [ 'image', 'shape', 'polys', 'ignore_tags' ]
+  loader:
+    shuffle: False
+    drop_last: False
+    batch_size_per_card: 1 # must be 1
+    num_workers: 2

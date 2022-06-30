@@ -19,11 +19,11 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import numpy as np
 import cv2
+import numpy as np
 import paddle
-from shapely.geometry import Polygon
 import pyclipper
+from shapely.geometry import Polygon
 
 
 class DBPostProcess(object):
@@ -54,7 +54,7 @@ class DBPostProcess(object):
             [[1, 1], [1, 1]])
         self.visual = visual_output
 
-    def boxes_from_bitmap(self, pred, _bitmap, dest_width, dest_height):
+    def boxes_from_bitmap(self, pred, _bitmap, classes, dest_width, dest_height):
         '''
         _bitmap: single map with shape (1, H, W),
                 whose values are binarized as {0, 1}
@@ -74,6 +74,8 @@ class DBPostProcess(object):
 
         boxes = []
         scores = []
+        class_indexes = []
+        class_scores = []
         for index in range(num_contours):
             contour = contours[index]
             points, sside = self.get_mini_boxes(contour)
@@ -81,9 +83,9 @@ class DBPostProcess(object):
                 continue
             points = np.array(points)
             if self.score_mode == "fast":
-                score = self.box_score_fast(pred, points.reshape(-1, 2))
+                score, class_index, class_score = self.box_score_fast(pred, points.reshape(-1, 2), classes)
             else:
-                score = self.box_score_slow(pred, contour)
+                score, class_index, class_score = self.box_score_slow(pred, contour, classes)
             if self.box_thresh > score:
                 continue
 
@@ -99,7 +101,14 @@ class DBPostProcess(object):
                 np.round(box[:, 1] / height * dest_height), 0, dest_height)
             boxes.append(box.astype(np.int16))
             scores.append(score)
-        return np.array(boxes, dtype=np.int16), scores
+
+            class_indexes.append(class_index)
+            class_scores.append(class_score)
+
+        if classes is None:
+            return np.array(boxes, dtype=np.int16), scores
+        else:
+            return np.array(boxes, dtype=np.int16), scores, class_indexes, class_scores
 
     def unclip(self, box):
         unclip_ratio = self.unclip_ratio
@@ -133,7 +142,7 @@ class DBPostProcess(object):
         ]
         return box, min(bounding_box[1])
 
-    def box_score_fast(self, bitmap, _box):
+    def box_score_fast(self, bitmap, _box, classes):
         '''
         box_score_fast: use bbox mean score as the mean score
         '''
@@ -148,9 +157,28 @@ class DBPostProcess(object):
         box[:, 0] = box[:, 0] - xmin
         box[:, 1] = box[:, 1] - ymin
         cv2.fillPoly(mask, box.reshape(1, -1, 2).astype(np.int32), 1)
-        return cv2.mean(bitmap[ymin:ymax + 1, xmin:xmax + 1], mask)[0]
+        if classes is None:
+            return cv2.mean(bitmap[ymin:ymax + 1, xmin:xmax + 1], mask)[0], None, None
+        else:
+            k = 999
+            class_mask = np.full((ymax - ymin + 1, xmax - xmin + 1), k, dtype=np.int32)
 
-    def box_score_slow(self, bitmap, contour):
+            cv2.fillPoly(class_mask, box.reshape(1, -1, 2).astype(np.int32), 0)
+            classes = classes[ymin:ymax + 1, xmin:xmax + 1]
+
+            new_classes = classes + class_mask
+
+            # 拉平
+            a = new_classes.reshape(-1)
+            b = np.where(a >= k)
+            classes = np.delete(a, b[0].tolist())
+
+            class_index = np.argmax(np.bincount(classes))
+            class_score = np.sum(classes == class_index) / len(classes)
+
+            return cv2.mean(bitmap[ymin:ymax + 1, xmin:xmax + 1], mask)[0], class_index, class_score
+
+    def box_score_slow(self, bitmap, contour, classes):
         '''
         box_score_slow: use polyon mean score as the mean score
         '''
@@ -169,7 +197,26 @@ class DBPostProcess(object):
         contour[:, 1] = contour[:, 1] - ymin
 
         cv2.fillPoly(mask, contour.reshape(1, -1, 2).astype(np.int32), 1)
-        return cv2.mean(bitmap[ymin:ymax + 1, xmin:xmax + 1], mask)[0]
+        if classes is None:
+            return cv2.mean(bitmap[ymin:ymax + 1, xmin:xmax + 1], mask)[0], None, None
+        else:
+            k = 999
+            class_mask = np.full((ymax - ymin + 1, xmax - xmin + 1), k, dtype=np.int32)
+
+            cv2.fillPoly(class_mask, contour.reshape(1, -1, 2).astype(np.int32), 0)
+            classes = classes[ymin:ymax + 1, xmin:xmax + 1]
+
+            new_classes = classes + class_mask
+
+            # 拉平
+            a = new_classes.reshape(-1)
+            b = np.where(a >= k)
+            classes = np.delete(a, b[0].tolist())
+
+            class_index = np.argmax(np.bincount(classes))
+            class_score = np.sum(classes == class_index) / len(classes)
+
+            return cv2.mean(bitmap[ymin:ymax + 1, xmin:xmax + 1], mask)[0], class_index, class_score
 
     def visual_output(self, pred):
         im = np.array(pred[0] * 255).astype(np.uint8)
@@ -185,6 +232,22 @@ class DBPostProcess(object):
         if self.visual:
             self.visual_output(pred)
 
+        if "classes" in outs_dict:
+            classes = outs_dict['classes']
+            print(classes.shape)
+            # print(classes)
+            # np.set_printoptions(threshold=np.inf)
+            if isinstance(classes, paddle.Tensor):
+                # classes = paddle.argmax(classes, axis=1, dtype='int32')
+                classes = classes.numpy()
+            # else:
+            # classes = np.argmax(classes, axis=1).astype(np.int32)
+            classes = classes[:, 0, :, :]
+            print(classes.shape)
+            # print(classes)
+        else:
+            classes = None
+
         boxes_batch = []
         for batch_index in range(pred.shape[0]):
             src_h, src_w, ratio_h, ratio_w = shape_list[batch_index]
@@ -194,10 +257,15 @@ class DBPostProcess(object):
                     self.dilation_kernel)
             else:
                 mask = segmentation[batch_index]
-            boxes, scores = self.boxes_from_bitmap(pred[batch_index], mask,
-                                                   src_w, src_h)
-
-            boxes_batch.append({'points': boxes})
+            if classes is None:
+                boxes, scores = self.boxes_from_bitmap(pred[batch_index], mask, None,
+                                                       src_w, src_h)
+                boxes_batch.append({'points': boxes})
+            else:
+                boxes, scores, class_indexes, class_scores = self.boxes_from_bitmap(pred[batch_index], mask,
+                                                                                    classes[batch_index],
+                                                                                    src_w, src_h)
+                boxes_batch.append({'points': boxes, "classes": class_indexes, "class_scores": class_scores})
         return boxes_batch
 
 

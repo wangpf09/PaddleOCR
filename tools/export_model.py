@@ -37,16 +37,16 @@ def export_single_model(model, arch_config, save_path, logger, quanter=None):
         other_shape = [
             paddle.static.InputSpec(
                 shape=[None, 1, 64, 256], dtype="float32"), [
-                    paddle.static.InputSpec(
-                        shape=[None, 256, 1],
-                        dtype="int64"), paddle.static.InputSpec(
-                            shape=[None, max_text_length, 1], dtype="int64"),
-                    paddle.static.InputSpec(
-                        shape=[None, 8, max_text_length, max_text_length],
-                        dtype="int64"), paddle.static.InputSpec(
-                            shape=[None, 8, max_text_length, max_text_length],
-                            dtype="int64")
-                ]
+                paddle.static.InputSpec(
+                    shape=[None, 256, 1],
+                    dtype="int64"), paddle.static.InputSpec(
+                    shape=[None, max_text_length, 1], dtype="int64"),
+                paddle.static.InputSpec(
+                    shape=[None, 8, max_text_length, max_text_length],
+                    dtype="int64"), paddle.static.InputSpec(
+                    shape=[None, 8, max_text_length, max_text_length],
+                    dtype="int64")
+            ]
         ]
         model = to_static(model, input_spec=other_shape)
     elif arch_config["algorithm"] == "SAR":
@@ -78,8 +78,8 @@ def export_single_model(model, arch_config, save_path, logger, quanter=None):
         if arch_config["model_type"] == "rec":
             infer_shape = [3, 48, -1]  # for rec model, H must be 32
             if "Transform" in arch_config and arch_config[
-                    "Transform"] is not None and arch_config["Transform"][
-                        "name"] == "TPS":
+                "Transform"] is not None and arch_config["Transform"][
+                "name"] == "TPS":
                 logger.info(
                     "When there is tps in the network, variable length input is not supported, and the input size needs to be the same as during training"
                 )
@@ -121,10 +121,10 @@ def main():
                                                    ]:  # distillation model
             for key in config["Architecture"]["Models"]:
                 if config["Architecture"]["Models"][key]["Head"][
-                        "name"] == 'MultiHead':  # multi head
+                    "name"] == 'MultiHead':  # multi head
                     out_channels_list = {}
                     if config['PostProcess'][
-                            'name'] == 'DistillationSARLabelDecode':
+                        'name'] == 'DistillationSARLabelDecode':
                         char_num = char_num - 2
                     out_channels_list['CTCLabelDecode'] = char_num
                     out_channels_list['SARLabelDecode'] = char_num + 2
@@ -137,7 +137,7 @@ def main():
                 config["Architecture"]["Models"][key][
                     "return_all_feats"] = False
         elif config['Architecture']['Head'][
-                'name'] == 'MultiHead':  # multi head
+            'name'] == 'MultiHead':  # multi head
             out_channels_list = {}
             char_num = len(getattr(post_process_class, 'character'))
             if config['PostProcess']['name'] == 'SARLabelDecode':
@@ -148,6 +148,9 @@ def main():
                 'out_channels_list'] = out_channels_list
         else:  # base rec model
             config["Architecture"]["Head"]["out_channels"] = char_num
+
+    if "num_classes" in config['Global']:
+        config['Architecture']["Head"]['num_classes'] = config['Global']["num_classes"]
 
     model = build_model(config["Architecture"])
     load_model(config, model)

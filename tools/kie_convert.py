@@ -2,8 +2,9 @@ import json
 
 if __name__ == '__main__':
     file = r'../cust-config/idcard/idcard_classes.txt'
-    label_file = r'E:\opt\ocr-axatp\idcard-1\Label.txt'
-    temp_file = r'E:\opt\ocr-axatp\idcard-1\temp.txt'
+    base_path = r'E:\opt\ocr-axatp\idcard-6-23\picture'
+    label_file = fr'{base_path}\Label.txt'
+    temp_file = rf'{base_path}\temp.txt'
     keys = {}
     with open(file, 'r', encoding='utf-8') as f:
         lines = f.readlines()
@@ -17,5 +18,6 @@ if __name__ == '__main__':
                 file, labels = line.split('\t')[0], json.loads(line.split('\t')[1])
                 for label in labels:
                     key_cls = label['key_cls']
-                    label['key_cls'] = int(keys[key_cls])
+                    label['label'] = int(keys[key_cls])
+                    label.pop('key_cls')
                 tmp.write(file + '\t' + json.dumps(labels, ensure_ascii=False) + '\n')

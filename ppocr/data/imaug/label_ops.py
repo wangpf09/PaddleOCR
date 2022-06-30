@@ -18,12 +18,11 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import copy
-import numpy as np
-import string
-from shapely.geometry import LineString, Point, Polygon
 import json
-import copy
-from scipy.spatial import distance as dist
+
+import numpy as np
+from shapely.geometry import LineString, Point, Polygon
+
 from ppocr.utils.logging import get_logger
 
 
@@ -41,23 +40,38 @@ class ClsLabelEncode(object):
 
 
 class DetLabelEncode(object):
-    def __init__(self, **kwargs):
-        pass
+    def __init__(self, label_list, num_classes=1, **kwargs):
+        self.num_classes = num_classes
+        self.label_list = []
+        if label_list is not None:
+            if isinstance(label_list, str):
+                with open(label_list, "r+", encoding="utf-8") as f:
+                    for line in f.readlines():
+                        self.label_list.append(line.replace("\n", ""))
+            else:
+                self.label_list = label_list
+        if num_classes != len(self.label_list):
+            assert "label_list长度与num_classes长度不匹配"
 
     def __call__(self, data):
         label = data['label']
         label = json.loads(label)
         nBox = len(label)
-        boxes, txts, txt_tags = [], [], []
+        boxes, txts, txt_tags, classes = [], [], [], []
         for bno in range(0, nBox):
             box = label[bno]['points']
             txt = label[bno]['transcription']
+            key_cls = label[bno]['key_cls']
             boxes.append(box)
             txts.append(txt)
             if txt in ['*', '###']:
                 txt_tags.append(True)
+                if self.num_classes > 1:
+                    classes.append(-2)
             else:
                 txt_tags.append(False)
+            if self.num_classes > 1:
+                classes.append(int(self.label_list.index(key_cls)))
         if len(boxes) == 0:
             return None
         boxes = self.expand_points_num(boxes)
@@ -67,6 +81,8 @@ class DetLabelEncode(object):
         data['polys'] = boxes
         data['texts'] = txts
         data['ignore_tags'] = txt_tags
+        if self.num_classes > 1:
+            data['classes'] = classes
         return data
 
     def order_points_clockwise(self, pts):
@@ -534,7 +550,7 @@ class SEEDLabelEncode(BaseRecLabelEncode):
             return None
         data['length'] = np.array(len(text)) + 1  # conclude eos
         text = text + [len(self.character) - 3] + [len(self.character) - 2] * (
-            self.max_text_len - len(text) - 1)
+                self.max_text_len - len(text) - 1)
         data['label'] = np.array(text)
         return data
 
@@ -746,7 +762,7 @@ class TableLabelEncode(object):
                               % beg_or_end
         else:
             assert False, "Unsupport type %s in char_or_elem" \
-                % char_or_elem
+                          % char_or_elem
         return idx
 
 
@@ -829,7 +845,7 @@ class PRENLabelEncode(BaseRecLabelEncode):
         text_list.append(self.end_idx)
         if len(text_list) < self.max_text_len:
             text_list += [self.padding_idx] * (
-                self.max_text_len - len(text_list))
+                    self.max_text_len - len(text_list))
         return text_list
 
     def __call__(self, data):
@@ -940,7 +956,7 @@ class VQATokenLabelEncode(object):
                     entities.append({
                         "start": len(input_ids_list),
                         "end":
-                        len(input_ids_list) + len(encode_res["input_ids"]),
+                            len(input_ids_list) + len(encode_res["input_ids"]),
                         "label": label.upper(),
                     })
             else:
@@ -1033,7 +1049,6 @@ class MultiLabelEncode(BaseRecLabelEncode):
                                          use_space_char, **kwargs)
 
     def __call__(self, data):
-
         data_ctc = copy.deepcopy(data)
         data_sar = copy.deepcopy(data)
         data_out = dict()

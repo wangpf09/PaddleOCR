@@ -16,10 +16,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import numpy as np
-
 import os
 import sys
+
+import numpy as np
 
 __dir__ = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(__dir__)
@@ -53,9 +53,41 @@ def draw_det_res(dt_boxes, config, img, img_name, save_path):
         logger.info("The detected Image saved in {}".format(save_path))
 
 
+def draw_det_res_and_label(dt_boxes, classes, config, img, img_name, save_path):
+    label_list = config["Global"]["label_list"]
+    labels = []
+    if label_list is not None:
+        if isinstance(label_list, str):
+            with open(label_list, "r+", encoding="utf-8") as f:
+                for line in f.readlines():
+                    labels.append(line.replace("\n", ""))
+        else:
+            labels = label_list
+    if len(dt_boxes) > 0:
+        import cv2
+        index = 0
+        src_im = img
+        for box in dt_boxes:
+            box = box.astype(np.int32).reshape((-1, 1, 2))
+            cv2.polylines(src_im, [box], True, color=(255, 255, 0), thickness=2)
+
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            src_im = cv2.putText(src_im, labels[classes[index]], (box[0][0][0], box[0][0][1]), font, 0.5, (255, 0, 0),
+                                 1)
+            index += 1
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+        save_path = os.path.join(save_path, os.path.basename(img_name))
+        cv2.imwrite(save_path, src_im)
+        logger.info("The detected Image saved in {}".format(save_path))
+
+
 @paddle.no_grad()
 def main():
     global_config = config['Global']
+
+    if "num_classes" in global_config:
+        config['Architecture']["Head"]['num_classes'] = global_config["num_classes"]
 
     # build model
     model = build_model(config['Architecture'])
@@ -110,7 +142,7 @@ def main():
                         dt_boxes_list.append(tmp_json)
                     det_box_json[k] = dt_boxes_list
                     save_det_path = os.path.dirname(config['Global'][
-                        'save_res_path']) + "/det_results_{}/".format(k)
+                                                        'save_res_path']) + "/det_results_{}/".format(k)
                     draw_det_res(boxes, config, src_img, file, save_det_path)
             else:
                 boxes = post_result[0]['points']
@@ -121,8 +153,12 @@ def main():
                     tmp_json['points'] = box.tolist()
                     dt_boxes_json.append(tmp_json)
                 save_det_path = os.path.dirname(config['Global'][
-                    'save_res_path']) + "/det_results/"
-                draw_det_res(boxes, config, src_img, file, save_det_path)
+                                                    'save_res_path']) + "/det_results/"
+                if "classes" in post_result[0]:
+                    draw_det_res_and_label(boxes, post_result[0]["classes"], config, src_img, file, save_det_path)
+                else:
+                    draw_det_res(boxes, config, src_img, file, save_det_path)
+
             otstr = file + "\t" + json.dumps(dt_boxes_json) + "\n"
             fout.write(otstr.encode())
 

@@ -35,7 +35,5 @@ test_tipc/web/node_modules/
 train_data
 pretrained_model
 
-
-pretrained_model
-train_data
 style_text_models
+models

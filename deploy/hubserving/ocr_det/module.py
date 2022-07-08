@@ -116,13 +116,14 @@ class OCRDet(hub.Module):
                 logger.info("error in loading image")
                 all_results.append([])
                 continue
-            dt_boxes, elapse = self.text_detector(img)
+            dt_boxes, dt_labels, dt_label_scores, elapse = self.text_detector(img)
             logger.info("Predict time : {}".format(elapse))
 
             rec_res_final = []
             for dno in range(len(dt_boxes)):
                 rec_res_final.append({
-                    'text_region': dt_boxes[dno].astype(np.int).tolist()
+                    'text_region': dt_boxes[dno].astype(np.int).tolist(),
+                    'label': dt_labels[dno]
                 })
             all_results.append(rec_res_final)
         return all_results

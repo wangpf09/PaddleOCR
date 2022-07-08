@@ -24,7 +24,6 @@ import cv2
 import numpy as np
 import time
 import sys
-from scipy.spatial import distance as dist
 
 import tools.infer.utility as utility
 from ppocr.utils.logging import get_logger
@@ -32,6 +31,7 @@ from ppocr.utils.utility import get_image_file_list, check_and_read_gif
 from ppocr.data import create_operators, transform
 from ppocr.postprocess import build_post_process
 import json
+
 logger = get_logger()
 
 
@@ -40,10 +40,11 @@ class TextDetector(object):
         self.args = args
         self.det_algorithm = args.det_algorithm
         self.use_onnx = args.use_onnx
+        self.labels = utility.read_labels(args.label_file)
         pre_process_list = [{
             'DetResizeForTest': {
-                'limit_side_len': args.det_limit_side_len,
-                'limit_type': args.det_limit_type,
+                'resize_long': args.det_limit_side_len,
+                # 'limit_type': args.det_limit_type,
             }
         }, {
             'NormalizeImage': {
@@ -181,6 +182,24 @@ class TextDetector(object):
         dt_boxes = np.array(dt_boxes_new)
         return dt_boxes
 
+    def filter_tag_det_res_and_label(self, dt_boxes, dt_labels, dt_label_scores, image_shape):
+        img_height, img_width = image_shape[0:2]
+        dt_boxes_new = []
+        dt_labels_new = []
+        dt_label_scores_new = []
+        for i, box in enumerate(dt_boxes):
+            box = self.order_points_clockwise(box)
+            box = self.clip_det_res(box, img_height, img_width)
+            rect_width = int(np.linalg.norm(box[0] - box[1]))
+            rect_height = int(np.linalg.norm(box[0] - box[3]))
+            if rect_width <= 3 or rect_height <= 3:
+                continue
+            dt_boxes_new.append(box)
+            dt_labels_new.append(self.labels[dt_labels[i]])
+            dt_label_scores_new.append(dt_label_scores[i])
+        dt_boxes = np.array(dt_boxes_new)
+        return dt_boxes, dt_labels_new, dt_label_scores_new
+
     def filter_tag_det_res_only_clip(self, dt_boxes, image_shape):
         img_height, img_width = image_shape[0:2]
         dt_boxes_new = []
@@ -233,30 +252,39 @@ class TextDetector(object):
             preds['f_tco'] = outputs[2]
             preds['f_tvo'] = outputs[3]
         elif self.det_algorithm in ['DB', 'PSE']:
-            preds['maps'] = outputs[0]
+            preds['classes'] = outputs[0]
+            preds['maps'] = outputs[1]
         elif self.det_algorithm == 'FCE':
             for i, output in enumerate(outputs):
                 preds['level_{}'.format(i)] = output
         else:
             raise NotImplementedError
 
-        #self.predictor.try_shrink_memory()
+        # self.predictor.try_shrink_memory()
         post_result = self.postprocess_op(preds, shape_list)
         dt_boxes = post_result[0]['points']
+        dt_labels, dt_label_scores = '', 0.
         if (self.det_algorithm == "SAST" and self.det_sast_polygon) or (
                 self.det_algorithm in ["PSE", "FCE"] and
                 self.postprocess_op.box_type == 'poly'):
             dt_boxes = self.filter_tag_det_res_only_clip(dt_boxes, ori_im.shape)
         else:
-            dt_boxes = self.filter_tag_det_res(dt_boxes, ori_im.shape)
+            dt_boxes, dt_labels, dt_label_scores = self.filter_tag_det_res_and_label(dt_boxes,
+                                                                                     post_result[0]["classes"],
+                                                                                     post_result[0]["class_scores"],
+                                                                                     ori_im.shape)
 
         if self.args.benchmark:
             self.autolog.times.end(stamp=True)
         et = time.time()
-        return dt_boxes, et - st
+        return dt_boxes, dt_labels, dt_label_scores, et - st
 
 
 if __name__ == "__main__":
+    import os
+
+    os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+
     args = utility.parse_args()
     image_file_list = get_image_file_list(args.image_dir)
     text_detector = TextDetector(args)
@@ -280,7 +308,7 @@ if __name__ == "__main__":
             logger.info("error in loading image:{}".format(image_file))
             continue
         st = time.time()
-        dt_boxes, _ = text_detector(img)
+        dt_boxes, dt_labels, dt_label_scores, t = text_detector(img)
         elapse = time.time() - st
         if count > 0:
             total_time += elapse
@@ -290,7 +318,7 @@ if __name__ == "__main__":
         save_results.append(save_pred)
         logger.info(save_pred)
         logger.info("The predict time of {}: {}".format(image_file, elapse))
-        src_im = utility.draw_text_det_res(dt_boxes, image_file)
+        src_im = utility.draw_text_det_res_label(dt_boxes, dt_labels, image_file)
         img_name_pure = os.path.split(image_file)[-1]
         img_path = os.path.join(draw_img_save,
                                 "det_res_{}".format(img_name_pure))

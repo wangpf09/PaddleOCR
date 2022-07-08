@@ -18,11 +18,11 @@ from __future__ import print_function
 
 import os
 import sys
+
 sys.path.insert(0, ".")
 import copy
 
 import time
-import paddlehub
 from paddlehub.common.logger import logger
 from paddlehub.module.module import moduleinfo, runnable, serving
 import cv2
@@ -118,7 +118,7 @@ class OCRSystem(hub.Module):
                 all_results.append([])
                 continue
             starttime = time.time()
-            dt_boxes, rec_res = self.text_sys(img)
+            dt_boxes, dt_labels, rec_res = self.text_sys(img)
             elapse = time.time() - starttime
             logger.info("Predict time: {}".format(elapse))
 
@@ -129,6 +129,7 @@ class OCRSystem(hub.Module):
                 text, score = rec_res[dno]
                 rec_res_final.append({
                     'text': text,
+                    'label': dt_labels[dno],
                     'confidence': float(score),
                     'text_region': dt_boxes[dno].astype(np.int).tolist()
                 })

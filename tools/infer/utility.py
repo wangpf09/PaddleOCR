@@ -13,17 +13,16 @@
 # limitations under the License.
 
 import argparse
+import math
 import os
-import sys
 import platform
+import sys
+
 import cv2
 import numpy as np
 import paddle
 from PIL import Image, ImageDraw, ImageFont
-import math
 from paddle import inference
-import time
-from ppocr.utils.logging import get_logger
 
 
 def str2bool(v):
@@ -47,6 +46,7 @@ def init_args():
     parser.add_argument("--det_model_dir", type=str)
     parser.add_argument("--det_limit_side_len", type=float, default=960)
     parser.add_argument("--det_limit_type", type=str, default='max')
+    parser.add_argument("--label_file", type=str, default='./config/labels.txt')
 
     # DB parmas
     parser.add_argument("--det_db_thresh", type=float, default=0.3)
@@ -381,6 +381,25 @@ def draw_text_det_res(dt_boxes, img_path):
     return src_im
 
 
+def read_labels(label_file):
+    labels = []
+    if label_file is not None:
+        with open(label_file, "r+", encoding="utf-8") as f:
+            for line in f.readlines():
+                labels.append(line.replace("\n", ""))
+    return labels
+
+
+def draw_text_det_res_label(dt_boxes, dt_labels, img_path):
+    src_im = cv2.imread(img_path)
+    for i, box in enumerate(dt_boxes):
+        box = np.array(box).astype(np.int32).reshape(-1, 2)
+        cv2.polylines(src_im, [box], True, color=(255, 255, 0), thickness=2)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(src_im, dt_labels[i], (box[0][0], box[0][1]), font, 0.5, (255, 0, 0), 1)
+    return src_im
+
+
 def resize_img(img, input_size=600):
     """
     resize img and limit the longest side of the image to input_size
@@ -436,6 +455,7 @@ def draw_ocr(image,
 
 def draw_ocr_box_txt(image,
                      boxes,
+                     labels,
                      txts,
                      scores=None,
                      drop_score=0.5,
@@ -449,7 +469,7 @@ def draw_ocr_box_txt(image,
     random.seed(0)
     draw_left = ImageDraw.Draw(img_left)
     draw_right = ImageDraw.Draw(img_right)
-    for idx, (box, txt) in enumerate(zip(boxes, txts)):
+    for idx, (box, label, txt) in enumerate(zip(boxes, labels, txts)):
         if scores is not None and scores[idx] < drop_score:
             continue
         color = (random.randint(0, 255), random.randint(0, 255),
@@ -460,11 +480,10 @@ def draw_ocr_box_txt(image,
                 box[0][0], box[0][1], box[1][0], box[1][1], box[2][0],
                 box[2][1], box[3][0], box[3][1]
             ],
-            outline=color)
-        box_height = math.sqrt((box[0][0] - box[3][0])**2 + (box[0][1] - box[3][
-            1])**2)
-        box_width = math.sqrt((box[0][0] - box[1][0])**2 + (box[0][1] - box[1][
-            1])**2)
+            outline=color
+        )
+        box_height = math.sqrt((box[0][0] - box[3][0]) ** 2 + (box[0][1] - box[3][1]) ** 2)
+        box_width = math.sqrt((box[0][0] - box[1][0]) ** 2 + (box[0][1] - box[1][1]) ** 2)
         if box_height > 2 * box_width:
             font_size = max(int(box_width * 0.9), 10)
             font = ImageFont.truetype(font_path, font_size, encoding="utf-8")
@@ -479,6 +498,7 @@ def draw_ocr_box_txt(image,
             font = ImageFont.truetype(font_path, font_size, encoding="utf-8")
             draw_right.text(
                 [box[0][0], box[0][1]], txt, fill=(0, 0, 0), font=font)
+            draw_right.text((box[0][0], box[0][1] - box_height), label, fill=(0, 0, 0), font=font)
     img_left = Image.blend(image, img_left, 0.5)
     img_show = Image.new('RGB', (w * 2, h), (255, 255, 255))
     img_show.paste(img_left, (0, 0, w, h))

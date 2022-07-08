@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-import sys
 import subprocess
+import sys
 
 __dir__ = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(__dir__)
@@ -35,6 +35,7 @@ import tools.infer.predict_cls as predict_cls
 from ppocr.utils.utility import get_image_file_list, check_and_read_gif
 from ppocr.utils.logging import get_logger
 from tools.infer.utility import draw_ocr_box_txt, get_rotate_crop_image
+
 logger = get_logger()
 
 
@@ -59,46 +60,41 @@ class TextSystem(object):
         for bno in range(bbox_num):
             cv2.imwrite(
                 os.path.join(output_dir,
-                             f"mg_crop_{bno+self.crop_image_res_index}.jpg"),
+                             f"mg_crop_{bno + self.crop_image_res_index}.jpg"),
                 img_crop_list[bno])
             logger.debug(f"{bno}, {rec_res[bno]}")
         self.crop_image_res_index += bbox_num
 
     def __call__(self, img, cls=True):
         ori_im = img.copy()
-        dt_boxes, elapse = self.text_detector(img)
-
-        logger.debug("dt_boxes num : {}, elapse : {}".format(
-            len(dt_boxes), elapse))
+        dt_boxes, dt_labels, dt_label_scores, elapse = self.text_detector(img)
+        logger.debug("dt_boxes num : {}, elapse : {}".format(len(dt_boxes), elapse))
         if dt_boxes is None:
             return None, None
         img_crop_list = []
 
-        dt_boxes = sorted_boxes(dt_boxes)
+        # dt_boxes = sorted_boxes(dt_boxes)
 
         for bno in range(len(dt_boxes)):
             tmp_box = copy.deepcopy(dt_boxes[bno])
             img_crop = get_rotate_crop_image(ori_im, tmp_box)
             img_crop_list.append(img_crop)
         if self.use_angle_cls and cls:
-            img_crop_list, angle_list, elapse = self.text_classifier(
-                img_crop_list)
-            logger.debug("cls num  : {}, elapse : {}".format(
-                len(img_crop_list), elapse))
+            img_crop_list, angle_list, elapse = self.text_classifier(img_crop_list)
+            logger.debug("cls num  : {}, elapse : {}".format(len(img_crop_list), elapse))
 
         rec_res, elapse = self.text_recognizer(img_crop_list)
-        logger.debug("rec_res num  : {}, elapse : {}".format(
-            len(rec_res), elapse))
+        logger.debug("rec_res num  : {}, elapse : {}".format(len(rec_res), elapse))
         if self.args.save_crop_res:
-            self.draw_crop_rec_res(self.args.crop_res_save_dir, img_crop_list,
-                                   rec_res)
-        filter_boxes, filter_rec_res = [], []
-        for box, rec_result in zip(dt_boxes, rec_res):
+            self.draw_crop_rec_res(self.args.crop_res_save_dir, img_crop_list, rec_res)
+        filter_boxes, filter_labels, filter_rec_res = [], [], []
+        for box, label, rec_result in zip(dt_boxes, dt_labels, rec_res):
             text, score = rec_result
             if score >= self.drop_score:
                 filter_boxes.append(box)
+                filter_labels.append(label)
                 filter_rec_res.append(rec_result)
-        return filter_boxes, filter_rec_res
+        return filter_boxes, filter_labels, filter_rec_res
 
 
 def sorted_boxes(dt_boxes):
@@ -138,7 +134,7 @@ def main(args):
 
     logger.info("In PP-OCRv3, rec_image_shape parameter defaults to '3, 48, 320', "
                 "if you are using recognition model with PP-OCRv2 or an older version, please set --rec_image_shape='3,32,320")
-                
+
     # warm up 10 times
     if args.warmup:
         img = np.random.uniform(0, 255, [640, 640, 3]).astype(np.uint8)
@@ -158,7 +154,7 @@ def main(args):
             logger.debug("error in loading image:{}".format(image_file))
             continue
         starttime = time.time()
-        dt_boxes, rec_res = text_sys(img)
+        dt_boxes, dt_labels, rec_res = text_sys(img)
         elapse = time.time() - starttime
         total_time += elapse
 
@@ -170,6 +166,7 @@ def main(args):
         res = [{
             "transcription": rec_res[idx][0],
             "points": np.array(dt_boxes[idx]).astype(np.int32).tolist(),
+            "label": dt_labels[idx]
         } for idx in range(len(dt_boxes))]
         save_pred = os.path.basename(image_file) + "\t" + json.dumps(
             res, ensure_ascii=False) + "\n"
@@ -184,6 +181,7 @@ def main(args):
             draw_img = draw_ocr_box_txt(
                 image,
                 boxes,
+                dt_labels,
                 txts,
                 scores,
                 drop_score=drop_score,
@@ -206,6 +204,10 @@ def main(args):
 
 
 if __name__ == "__main__":
+    import os
+
+    os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+
     args = utility.parse_args()
     if args.use_mp:
         p_list = []
